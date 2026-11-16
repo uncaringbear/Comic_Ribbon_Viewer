@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Seamless Comic &amp; Image Ribbon Viewer</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body, html {
+      width: 100%;
+      height: 100%;
+      background-color: #0d0d0d;
+      color: #eeeeee;
+      font-family: system-ui, -apple-system, sans-serif;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* Setup & Configuration Screen */
+    #drop-zone {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #141414;
+      border: 3px dashed #383838;
+      margin: 20px;
+      border-radius: 16px;
+      z-index: 100;
+      padding: 24px;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    #drop-zone.dragover {
+      border-color: #3b82f6;
+      background: #1b222c;
+    }
+    #drop-zone h1 { font-size: 1.8rem; margin-bottom: 8px; }
+    .subtitle { color: #999; margin-bottom: 20px; text-align: center; font-size: 0.95rem; }
+
+    /* Config Card */
+    .config-panel {
+      background: #1d1d1d;
+      border: 1px solid #2e2e2e;
+      border-radius: 12px;
+      padding: 18px 24px;
+      width: 100%;
+      max-width: 520px;
+      margin-bottom: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .config-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.95rem;
+    }
+    .config-row label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+    }
+    .config-sub {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding-left: 26px;
+      font-size: 0.88rem;
+      color: #bbb;
+      transition: opacity 0.2s;
+    }
+    .config-sub.disabled {
+      opacity: 0.35;
+      pointer-events: none;
+    }
+    input[type="checkbox"] {
+      width: 17px;
+      height: 17px;
+      accent-color: #3b82f6;
+      cursor: pointer;
+    }
+    input[type="number"], select {
+      background: #2a2a2a;
+      color: #fff;
+      border: 1px solid #444;
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 0.88rem;
+    }
+    input[type="number"] { width: 68px; }
+
+    .btn {
+      background: #3b82f6;
+      color: white;
+      border: none;
+      padding: 13px 28px;
+      font-size: 1rem;
+      font-weight: 600;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn:hover { background: #2563eb; }
+    #file-input { display: none; }
+
+    .controls-hint {
+      margin-top: 18px;
+      font-size: 0.82rem;
+      color: #777;
+      text-align: center;
+      line-height: 1.6;
+      max-width: 640px;
+    }
+
+    /* Seamless Horizontal Strip */
+    #viewport {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      cursor: grab;
+      display: none;
+      background-color: #0d0d0d;
+    }
+    #viewport:active { cursor: grabbing; }
+
+    #ribbon {
+      display: flex;
+      flex-direction: row;
+      flex-wrap: nowrap;
+      height: 100vh;
+      gap: 0px;
+      will-change: transform;
+      transform-origin: 0 0;
+    }
+    #ribbon img {
+      height: 100vh;
+      width: auto;
+      display: block;
+      flex-shrink: 0;
+      pointer-events: none;
+    }
+
+    /* HUD & Toast Notifications */
+    #hud {
+      position: fixed;
+      bottom: 16px;
+      right: 16px;
+      background: rgba(0, 0, 0, 0.78);
+      backdrop-filter: blur(6px);
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      color: #ccc;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      z-index: 50;
+    }
+    body:hover #hud { opacity: 1; }
+
+    #toast {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(20, 20, 20, 0.88);
+      border: 1px solid #3a3a3a;
+      color: #fff;
+      padding: 8px 18px;
+      border-radius: 20px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      opacity: 0;
+      transition: opacity 0.25s;
+      pointer-events: none;
+      z-index: 60;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="drop-zone">
+    <h1>Comic &amp; Image Ribbon Viewer</h1>
+    <p class="subtitle">Configure your view below, then drag &amp; drop a folder/files or click Select Images.</p>
+
+    <div class="config-panel">
+      <div class="config-row">
+        <label><input type="checkbox" id="opt-manga"> <strong>Manga Mode</strong> (Right-to-Left order &amp; direction)</label>
+      </div>
+      <div class="config-row">
+        <label><input type="checkbox" id="opt-loop"> <strong>Continuous Loop</strong> (Seamless wrap-around)</label>
+      </div>
+      <div class="config-row">
+        <label><input type="checkbox" id="opt-random"> <strong>Randomize Images</strong> (Shuffle order)</label>
+      </div>
+      <div class="config-row">
+        <label><input type="checkbox" id="opt-gutter"> <strong>Vertical Gutter</strong> (Spacing between images)</label>
+      </div>
+      <div class="config-sub disabled" id="gutter-settings">
+        <span>Width (px): <input type="number" id="opt-gutter-width" value="12" min="1" max="500"></span>
+        <span>Color:
+          <select id="opt-gutter-color">
+            <option value="#000000">Solid Black</option>
+            <option value="#ffffff">Solid White</option>
+          </select>
+        </span>
+      </div>
+    </div>
+
+    <button class="btn" onclick="document.getElementById('file-input').click()">Select Images</button>
+    <input type="file" id="file-input" multiple accept="image/*">
+
+    <div class="controls-hint">
+      <strong>Wheel / Arrows / Drag:</strong> Scroll &bull;
+      <strong>Space:</strong> Auto-Pan &bull;
+      <strong>R:</strong> Reverse &bull;
+      <strong>+ / -:</strong> Auto-Pan Speed<br>
+      <strong>Double-Click:</strong> Zoom to Panel &bull;
+      <strong>Keys 1–0:</strong> Jump to % Position &bull;
+      <strong>F:</strong> Fullscreen &bull;
+      <strong>Esc:</strong> Setup
+    </div>
+  </div>
+
+  <div id="viewport">
+    <div id="ribbon"></div>
+  </div>
+
+  <div id="toast"></div>
+  <div id="hud">
+    Space: Auto-Pan &bull; +/-: Speed &bull; R: Reverse &bull; Dbl-Click: Zoom &bull; 1–0: Jump &bull; F: Fullscreen &bull; Esc: Setup
+  </div>
+
+  <script>
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const viewport = document.getElementById('viewport');
+    const ribbon = document.getElementById('ribbon');
+    const toast = document.getElementById('toast');
+
+    // Config elements
+    const optManga = document.getElementById('opt-manga');
+    const optLoop = document.getElementById('opt-loop');
+    const optRandom = document.getElementById('opt-random');
+    const optGutter = document.getElementById('opt-gutter');
+    const optGutterWidth = document.getElementById('opt-gutter-width');
+    const optGutterColor = document.getElementById('opt-gutter-color');
+    const gutterSettings = document.getElementById('gutter-settings');
+
+    optGutter.addEventListener('change', () => {
+      gutterSettings.classList.toggle('disabled', !optGutter.checked);
+    });
+
+    // State
+    let totalImages = 0;
+    let isLooping = false;
+    let isManga = false;
+    let singleSetWidth = 0;
+    let maxScroll = 0;
+
+    let currentX = 0;
+    let targetX = 0;
+
+    // Zoom state
+    let currentScale = 1;
+    let targetScale = 1;
+    let currentY = 0;
+    let targetY = 0;
+
+    // Interaction & Auto-scroll
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let dragStartTargetX = 0;
+    let dragStartTargetY = 0;
+
+    let autoScrollSpeed = 0;
+    let baseAutoSpeed = 2.5;
+    const keysPressed = {};
+    let toastTimer = null;
+
+    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+    function showToast(msg) {
+      toast.textContent = msg;
+      toast.style.opacity = '1';
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 1600);
+    }
+
+    function shuffleArray(arr) {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    function loadFiles(fileList) {
+      let images = Array.from(fileList).filter(f => f.type.startsWith('image/'));
+      if (!images.length) return;
+
+      isManga = optManga.checked;
+      isLooping = optLoop.checked;
+      const isRandom = optRandom.checked;
+      const useGutter = optGutter.checked;
+      const gutterWidth = useGutter ? Math.max(0, parseInt(optGutterWidth.value, 10) || 0) : 0;
+      const gutterColor = useGutter ? optGutterColor.value : '#0d0d0d';
+
+      if (isRandom) {
+        images = shuffleArray(images);
+      } else {
+        images.sort((a, b) => collator.compare(a.name, b.name));
+        if (isManga) images.reverse();
+      }
+
+      totalImages = images.length;
+      const objectUrls = images.map(f => URL.createObjectURL(f));
+
+      // Apply gutter styling
+      viewport.style.backgroundColor = gutterColor;
+      ribbon.style.gap = `${gutterWidth}px`;
+      ribbon.style.paddingRight = isLooping ? `${gutterWidth}px` : '0px';
+      ribbon.innerHTML = '';
+
+      // Duplicate image set when looping is enabled for seamless wrap-around
+      const renderUrls = isLooping ? [...objectUrls, ...objectUrls] : objectUrls;
+
+      renderUrls.forEach(url => {
+        const img = document.createElement('img');
+        img.src = url;
+        img.onload = () => {
+          updateBounds();
+          if (isManga && !isLooping && currentX === 0 && targetX === 0) {
+            currentX = targetX = maxScroll;
+          }
+        };
+        ribbon.appendChild(img);
+      });
+
+      // Reset view & zoom
+      currentScale = targetScale = 1;
+      currentY = targetY = 0;
+      autoScrollSpeed = 0;
+      baseAutoSpeed = isManga ? -2.5 : 2.5;
+
+      dropZone.style.display = 'none';
+      viewport.style.display = 'block';
+
+      // Wait one frame for layout dimensions, then set starting position
+      requestAnimationFrame(() => {
+        updateBounds();
+        if (isManga && !isLooping) {
+          currentX = targetX = maxScroll;
+        } else if (isManga && isLooping) {
+          currentX = targetX = Math.max(0, singleSetWidth - window.innerWidth);
+        } else {
+          currentX = targetX = 0;
+        }
+      });
+    }
+
+    function updateBounds() {
+      if (isLooping) {
+        singleSetWidth = ribbon.scrollWidth / 2;
+        maxScroll = ribbon.scrollWidth;
+      } else {
+        singleSetWidth = ribbon.scrollWidth;
+        maxScroll = Math.max(0, ribbon.scrollWidth * targetScale - window.innerWidth);
+      }
+    }
+
+    window.addEventListener('resize', updateBounds);
+
+    // File input & Drag-and-Drop
+    fileInput.addEventListener('change', e => loadFiles(e.target.files));
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      if (e.dataTransfer.files.length) loadFiles(e.dataTransfer.files);
+    });
+
+    // Mouse Wheel
+    window.addEventListener('wheel', e => {
+      if (viewport.style.display === 'none') return;
+      e.preventDefault();
+      autoScrollSpeed = 0;
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      targetX += delta * 1.25;
+    }, { passive: false });
+
+    // Click and Drag (supports horizontal & vertical panning when zoomed)
+    viewport.addEventListener('mousedown', e => {
+      isDragging = true;
+      autoScrollSpeed = 0;
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+      dragStartTargetX = targetX;
+      dragStartTargetY = targetY;
+    });
+    window.addEventListener('mousemove', e => {
+      if (!isDragging) return;
+      targetX = dragStartTargetX - (e.clientX - dragStartX);
+      if (targetScale > 1) {
+        const maxY = window.innerHeight * (targetScale - 1);
+        targetY = Math.max(0, Math.min(maxY, dragStartTargetY - (e.clientY - dragStartY)));
+      }
+    });
+    window.addEventListener('mouseup', () => isDragging = false);
+
+    // Double-Click Zoom-to-Panel
+    viewport.addEventListener('dblclick', e => {
+      autoScrollSpeed = 0;
+      if (targetScale === 1) {
+        const zoomFactor = 2.2;
+        const clickWorldX = currentX + e.clientX;
+        const clickWorldY = e.clientY;
+
+        targetScale = zoomFactor;
+        targetX = clickWorldX * zoomFactor - e.clientX;
+        targetY = Math.max(0, Math.min(window.innerHeight * (zoomFactor - 1), clickWorldY * zoomFactor - e.clientY));
+        showToast('Zoom: 2.2x (Double-click to reset)');
+      } else {
+        targetX = (currentX + e.clientX) / currentScale - e.clientX;
+        targetScale = 1;
+        targetY = 0;
+        showToast('Zoom: 1.0x');
+      }
+      updateBounds();
+    });
+
+    // Jump to Image by Hotkey (1-0)
+    function jumpToHotkey(digit) {
+      if (totalImages === 0) return;
+      autoScrollSpeed = 0;
+
+      // Reset zoom cleanly before jumping
+      targetScale = 1;
+      targetY = 0;
+
+      let logicalIndex = 0;
+      let label = '';
+
+      if (digit === 1) {
+        logicalIndex = 0;
+        label = `Image 1 of ${totalImages} (Start)`;
+      } else if (digit === 0) {
+        logicalIndex = totalImages - 1;
+        label = `Image ${totalImages} of ${totalImages} (End)`;
+      } else {
+        const pct = digit * 10;
+        logicalIndex = Math.min(totalImages - 1, Math.max(0, Math.round((digit / 10) * totalImages) - 1));
+        label = `${pct}% — Image ${logicalIndex + 1} of ${totalImages}`;
+      }
+
+      // In Manga mode, images are reversed in the DOM so logical index 0 is on the far right
+      const domIndex = isManga ? (totalImages - 1 - logicalIndex) : logicalIndex;
+      const targetImg = ribbon.children[domIndex];
+
+      if (targetImg) {
+        if (isManga) {
+          targetX = (targetImg.offsetLeft + targetImg.offsetWidth) - window.innerWidth;
+        } else {
+          targetX = targetImg.offsetLeft;
+        }
+        showToast(label);
+      }
+    }
+
+    // Keyboard Controls
+    window.addEventListener('keydown', e => {
+      if (viewport.style.display === 'none') return;
+      keysPressed[e.key] = true;
+
+      // Number hotkeys 1-9 and 0
+      if (/^[0-9]$/.test(e.key)) {
+        jumpToHotkey(parseInt(e.key, 10));
+        return;
+      }
+
+      if (e.key === ' ') {
+        e.preventDefault();
+        if (autoScrollSpeed !== 0) {
+          baseAutoSpeed = autoScrollSpeed;
+          autoScrollSpeed = 0;
+          showToast('Auto-Pan: Paused');
+        } else {
+          autoScrollSpeed = baseAutoSpeed;
+          showToast(`Auto-Pan: ${Math.abs(autoScrollSpeed).toFixed(1)} px/frame`);
+        }
+      } else if (e.key === '=' || e.key === '+') {
+        const dir = (autoScrollSpeed !== 0 ? Math.sign(autoScrollSpeed) : Math.sign(baseAutoSpeed)) || 1;
+        const newMag = Math.min(30, Math.abs(autoScrollSpeed || baseAutoSpeed) + 0.75);
+        baseAutoSpeed = dir * newMag;
+        if (autoScrollSpeed !== 0) autoScrollSpeed = baseAutoSpeed;
+        showToast(`Auto-Pan Speed: ${newMag.toFixed(2)}`);
+      } else if (e.key === '-' || e.key === '_') {
+        const dir = (autoScrollSpeed !== 0 ? Math.sign(autoScrollSpeed) : Math.sign(baseAutoSpeed)) || 1;
+        const newMag = Math.max(0.25, Math.abs(autoScrollSpeed || baseAutoSpeed) - 0.75);
+        baseAutoSpeed = dir * newMag;
+        if (autoScrollSpeed !== 0) autoScrollSpeed = baseAutoSpeed;
+        showToast(`Auto-Pan Speed: ${newMag.toFixed(2)}`);
+      } else if (e.key.toLowerCase() === 'r') {
+        baseAutoSpeed = -baseAutoSpeed;
+        autoScrollSpeed = autoScrollSpeed !== 0 ? -autoScrollSpeed : baseAutoSpeed;
+        showToast(autoScrollSpeed > 0 ? 'Direction: Left-to-Right →' : 'Direction: Right-to-Left ←');
+      } else if (e.key.toLowerCase() === 'f') {
+        if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+        else document.exitFullscreen();
+      } else if (e.key === 'Escape' && !document.fullscreenElement) {
+        autoScrollSpeed = 0;
+        viewport.style.display = 'none';
+        dropZone.style.display = 'flex';
+      }
+    });
+    window.addEventListener('keyup', e => { keysPressed[e.key] = false; });
+
+    // Smooth Render Loop
+    function animate() {
+      if (viewport.style.display !== 'none') {
+        const keySpeed = 18;
+        if (keysPressed['ArrowRight'] || keysPressed['d']) { autoScrollSpeed = 0; targetX += keySpeed; }
+        if (keysPressed['ArrowLeft'] || keysPressed['a']) { autoScrollSpeed = 0; targetX -= keySpeed; }
+
+        if (targetScale > 1) {
+          const maxY = window.innerHeight * (targetScale - 1);
+          if (keysPressed['ArrowDown'] || keysPressed['s']) targetY = Math.min(maxY, targetY + keySpeed);
+          if (keysPressed['ArrowUp'] || keysPressed['w']) targetY = Math.max(0, targetY - keySpeed);
+        }
+
+        targetX += autoScrollSpeed;
+
+        if (isLooping && singleSetWidth > 0) {
+          const scaledSetWidth = singleSetWidth * targetScale;
+          // Seamless wrap-around without visual jump
+          if (targetX >= scaledSetWidth) {
+            targetX -= scaledSetWidth;
+            currentX -= scaledSetWidth;
+          } else if (targetX < 0) {
+            targetX += scaledSetWidth;
+            currentX += scaledSetWidth;
+          }
+        } else {
+          const currentMaxScroll = Math.max(0, ribbon.scrollWidth * targetScale - window.innerWidth);
+          targetX = Math.max(0, Math.min(targetX, currentMaxScroll));
+        }
+
+        // Smooth interpolation
+        currentX += (targetX - currentX) * 0.14;
+        currentY += (targetY - currentY) * 0.14;
+        currentScale += (targetScale - currentScale) * 0.16;
+
+        ribbon.style.transform = `translate3d(${-currentX.toFixed(2)}px, ${-currentY.toFixed(2)}px, 0) scale(${currentScale.toFixed(4)})`;
+      }
+      requestAnimationFrame(animate);
+    }
+    requestAnimationFrame(animate);
+  </script>
+</body>
+</html>

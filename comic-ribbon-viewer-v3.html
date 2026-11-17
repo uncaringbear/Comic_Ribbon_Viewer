@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Seamless Comic & Image Ribbon Viewer (WebGL2 Sharp)</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body, html {
+      width: 100%;
+      height: 100%;
+      background-color: #0d0d0d;
+      color: #eeeeee;
+      font-family: system-ui, -apple-system, sans-serif;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* Setup & Configuration Screen */
+    #drop-zone {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #141414;
+      border: 3px dashed #383838;
+      margin: 20px;
+      border-radius: 16px;
+      z-index: 100;
+      padding: 24px;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    #drop-zone.dragover {
+      border-color: #3b82f6;
+      background: #1b222c;
+    }
+    #drop-zone h1 { font-size: 1.8rem; margin-bottom: 6px; }
+    .subtitle { color: #999; margin-bottom: 18px; text-align: center; font-size: 0.95rem; }
+
+    /* Config Card */
+    .config-panel {
+      background: #1d1d1d;
+      border: 1px solid #2e2e2e;
+      border-radius: 12px;
+      padding: 18px 24px;
+      width: 100%;
+      max-width: 540px;
+      margin-bottom: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 13px;
+    }
+    .config-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.95rem;
+    }
+    .config-row label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+    }
+    .config-sub {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding-left: 26px;
+      font-size: 0.88rem;
+      color: #bbb;
+      transition: opacity 0.2s;
+    }
+    .config-sub.disabled {
+      opacity: 0.35;
+      pointer-events: none;
+    }
+    input[type="checkbox"] {
+      width: 17px;
+      height: 17px;
+      accent-color: #3b82f6;
+      cursor: pointer;
+    }
+    input[type="number"], select {
+      background: #2a2a2a;
+      color: #fff;
+      border: 1px solid #444;
+      border-radius: 6px;
+      padding: 5px 8px;
+      font-size: 0.88rem;
+    }
+    input[type="number"] { width: 68px; }
+
+    .btn {
+      background: #3b82f6;
+      color: white;
+      border: none;
+      padding: 13px 28px;
+      font-size: 1rem;
+      font-weight: 600;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn:hover { background: #2563eb; }
+    #file-input { display: none; }
+
+    .controls-hint {
+      margin-top: 16px;
+      font-size: 0.82rem;
+      color: #777;
+      text-align: center;
+      line-height: 1.6;
+      max-width: 680px;
+    }
+
+    /* WebGL Viewport */
+    #viewport {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      cursor: grab;
+      display: none;
+      position: relative;
+    }
+    #viewport:active { cursor: grabbing; }
+
+    #gl-canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    /* HUD & Toast Notifications */
+    #hud {
+      position: fixed;
+      bottom: 16px;
+      right: 16px;
+      background: rgba(0, 0, 0, 0.78);
+      backdrop-filter: blur(6px);
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      color: #ccc;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      z-index: 50;
+    }
+    body:hover #hud { opacity: 1; }
+
+    #toast {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(20, 20, 20, 0.90);
+      border: 1px solid #3a3a3a;
+      color: #fff;
+      padding: 8px 18px;
+      border-radius: 20px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      opacity: 0;
+      transition: opacity 0.25s;
+      pointer-events: none;
+      z-index: 60;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="drop-zone">
+    <h1>Comic &amp; Image Ribbon Viewer <span style="font-size:0.85rem; color:#3b82f6; vertical-align:middle;">WebGL2</span></h1>
+    <p class="subtitle">GPU-accelerated Catmull-Rom + Contrast-Adaptive Sharpening (CAS) for 4K displays.</p>
+
+    <div class="config-panel">
+      <div class="config-row">
+        <span><strong>GPU Upscale Mode</strong></span>
+        <select id="opt-sharpness">
+          <option value="2" selected>Catmull-Rom + CAS (Balanced — Recommended)</option>
+          <option value="3">Catmull-Rom + CAS (Strong Ink Sharpening)</option>
+          <option value="1">Catmull-Rom + CAS (Subtle)</option>
+          <option value="0">Catmull-Rom Bicubic Only (Smooth, No Sharpen)</option>
+          <option value="4">Standard Hardware Bilinear</option>
+        </select>
+      </div>
+      <div class="config-row">
+        <label><input type="checkbox" id="opt-manga"> <strong>Manga Mode</strong> (Right-to-Left order &amp; direction)</label>
+      </div>
+      <div class="config-row">
+        <label><input type="checkbox" id="opt-loop"> <strong>Continuous Loop</strong> (Seamless wrap-around)</label>
+      </div>
+      <div class="config-row">
+        <label><input type="checkbox" id="opt-random"> <strong>Randomize Images</strong> (Shuffle order)</label>
+      </div>
+      <div class="config-row">
+        <label><input type="checkbox" id="opt-gutter"> <strong>Vertical Gutter</strong> (Spacing between images)</label>
+      </div>
+      <div class="config-sub disabled" id="gutter-settings">
+        <span>Width (px): <input type="number" id="opt-gutter-width" value="12" min="1" max="500"></span>
+        <span>Color:
+          <select id="opt-gutter-color">
+            <option value="#000000">Solid Black</option>
+            <option value="#ffffff">Solid White</option>
+          </select>
+        </span>
+      </div>
+    </div>
+
+    <button class="btn" onclick="document.getElementById('file-input').click()">Select Images</button>
+    <input type="file" id="file-input" multiple accept="image/*">
+
+    <div class="controls-hint">
+      <strong>Wheel / Arrows / Drag:</strong> Scroll &bull;
+      <strong>Space:</strong> Auto-Pan &bull;
+      <strong>R:</strong> Reverse &bull;
+      <strong>+ / -:</strong> Speed &bull;
+      <strong>K:</strong> Cycle Shader<br>
+      <strong>Double-Click:</strong> Zoom to Panel &bull;
+      <strong>Keys 1–0:</strong> Jump to % Position &bull;
+      <strong>F:</strong> Fullscreen &bull;
+      <strong>Esc:</strong> Setup
+    </div>
+  </div>
+
+  <div id="viewport">
+    <canvas id="gl-canvas"></canvas>
+  </div>
+
+  <div id="toast"></div>
+  <div id="hud">
+    Space: Auto-Pan &bull; +/-: Speed &bull; R: Reverse &bull; K: Shader Mode &bull; Dbl-Click: Zoom &bull; 1–0: Jump &bull; F: Fullscreen &bull; Esc: Setup
+  </div>
+
+  <script>
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const viewport = document.getElementById('viewport');
+    const canvas = document.getElementById('gl-canvas');
+    const toast = document.getElementById('toast');
+
+    // Config elements
+    const optSharpness = document.getElementById('opt-sharpness');
+    const optManga = document.getElementById('opt-manga');
+    const optLoop = document.getElementById('opt-loop');
+    const optRandom = document.getElementById('opt-random');
+    const optGutter = document.getElementById('opt-gutter');
+    const optGutterWidth = document.getElementById('opt-gutter-width');
+    const optGutterColor = document.getElementById('opt-gutter-color');
+    const gutterSettings = document.getElementById('gutter-settings');
+
+    optGutter.addEventListener('change', () => {
+      gutterSettings.classList.toggle('disabled', !optGutter.checked);
+    });
+
+    // =========================================================================
+    // WEBGL2 SHADER PIPELINE (Catmull-Rom 16-tap Bicubic + AMD CAS Sharpening)
+    // =========================================================================
+    const gl = canvas.getContext('webgl2', {
+      alpha: false,
+      antialias: false,
+      depth: false,
+      stencil: false,
+      powerPreference: 'high-performance'
+    });
+
+    if (!gl) {
+      alert('WebGL2 is not supported or disabled in this browser. Please enable hardware acceleration.');
+    }
+
+    const vsSource = `#version 300 es
+      layout(location = 0) in vec2 a_pos;
+      layout(location = 1) in vec2 a_uv;
+      uniform vec2 u_resolution;
+      uniform vec4 u_rect; // x, y, width, height in CSS pixels
+      out vec2 v_uv;
+      void main() {
+        vec2 pixelPos = u_rect.xy + a_pos * u_rect.zw;
+        vec2 clipPos = (pixelPos / u_resolution) * 2.0 - 1.0;
+        gl_Position = vec4(clipPos.x, -clipPos.y, 0.0, 1.0);
+        v_uv = a_uv;
+      }
+    `;
+
+    // High-precision 4x4 Catmull-Rom + Contrast-Adaptive Sharpening (CAS)
+    const fsSource = `#version 300 es
+      precision highp float;
+
+      uniform sampler2D u_tex;
+      uniform vec2 u_texSize;
+      uniform float u_sharpness; // 0.0 = bicubic only, >0.0 = CAS strength, <0.0 = bilinear
+      in vec2 v_uv;
+      out vec4 fragColor;
+
+      // Catmull-Rom spline weight (B=0, C=0.5) - preserves sharp ink transitions without ringing
+      vec4 cubicWeights(float x) {
+        float x2 = x * x;
+        float x3 = x2 * x;
+        vec4 w;
+        w.x = -0.5 * x3 + x2 - 0.5 * x;
+        w.y =  1.5 * x3 - 2.5 * x2 + 1.0;
+        w.z = -1.5 * x3 + 2.0 * x2 + 0.5 * x;
+        w.w =  0.5 * x3 - 0.5 * x2;
+        return w;
+      }
+
+      vec3 sampleCatmullRom(vec2 uv) {
+        vec2 texelSize = 1.0 / u_texSize;
+        vec2 samplePos = uv * u_texSize;
+        vec2 texPos1 = floor(samplePos - 0.5) + 0.5;
+        vec2 f = samplePos - texPos1;
+
+        vec4 wx = cubicWeights(f.x);
+        vec4 wy = cubicWeights(f.y);
+
+        // Optimized 9-fetch bilinear-exploiting Catmull-Rom sampling
+        vec2 w0 = vec2(wx.x, wy.x);
+        vec2 w12 = vec2(wx.y + wx.z, wy.y + wy.z);
+        vec2 w3 = vec2(wx.w, wy.w);
+
+        vec2 offset0 = texPos1 - 1.0;
+        vec2 offset12 = texPos1 + vec2(wx.z, wy.z) / w12;
+        vec2 offset3 = texPos1 + 2.0;
+
+        offset0 *= texelSize;
+        offset12 *= texelSize;
+        offset3 *= texelSize;
+
+        vec3 result = vec3(0.0);
+        result += texture(u_tex, vec2(offset0.x,  offset0.y)).rgb  * w0.x  * w0.y;
+        result += texture(u_tex, vec2(offset12.x, offset0.y)).rgb  * w12.x * w0.y;
+        result += texture(u_tex, vec2(offset3.x,  offset0.y)).rgb  * w3.x  * w0.y;
+
+        result += texture(u_tex, vec2(offset0.x,  offset12.y)).rgb * w0.x  * w12.y;
+        result += texture(u_tex, vec2(offset12.x, offset12.y)).rgb * w12.x * w12.y;
+        result += texture(u_tex, vec2(offset3.x,  offset12.y)).rgb * w3.x  * w12.y;
+
+        result += texture(u_tex, vec2(offset0.x,  offset3.y)).rgb  * w0.x  * w3.y;
+        result += texture(u_tex, vec2(offset12.x, offset3.y)).rgb  * w12.x * w3.y;
+        result += texture(u_tex, vec2(offset3.x,  offset3.y)).rgb  * w3.x  * w3.y;
+
+        return clamp(result, 0.0, 1.0);
+      }
+
+      float luma(vec3 c) {
+        return dot(c, vec3(0.299, 0.587, 0.114));
+      }
+
+      void main() {
+        if (u_sharpness < 0.0) {
+          fragColor = texture(u_tex, v_uv);
+          return;
+        }
+
+        vec3 e = sampleCatmullRom(v_uv);
+
+        if (u_sharpness <= 0.001) {
+          fragColor = vec4(e, 1.0);
+          return;
+        }
+
+        // Contrast-Adaptive Sharpening (CAS) in source-texel neighborhood
+        // Sharpens soft edges while suppressing ringing on high-contrast black/white manga ink
+        vec2 dx = vec2(1.0 / u_texSize.x, 0.0);
+        vec2 dy = vec2(0.0, 1.0 / u_texSize.y);
+
+        vec3 b = texture(u_tex, v_uv - dy).rgb;
+        vec3 d = texture(u_tex, v_uv - dx).rgb;
+        vec3 f = texture(u_tex, v_uv + dx).rgb;
+        vec3 h = texture(u_tex, v_uv + dy).rgb;
+
+        float lb = luma(b);
+        float ld = luma(d);
+        float le = luma(e);
+        float lf = luma(f);
+        float lh = luma(h);
+
+        float minL = min(le, min(min(lb, lh), min(ld, lf)));
+        float maxL = max(le, max(max(lb, lh), max(ld, lf)));
+
+        // Adaptive attenuation: reduces sharpening where contrast is already maxed out (e.g. pure black ink on white)
+        float amp = clamp(min(minL, 1.0 - maxL) / max(maxL, 0.0001), 0.0, 1.0);
+        amp = sqrt(amp);
+
+        float peak = -1.0 / mix(8.0, 4.5, clamp(u_sharpness, 0.0, 1.0));
+        float w = amp * peak;
+
+        vec3 sharpened = (e + (b + d + f + h) * w) / (1.0 + 4.0 * w);
+        fragColor = vec4(clamp(sharpened, 0.0, 1.0), 1.0);
+      }
+    `;
+
+    function compileShader(type, src) {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(s));
+      }
+      return s;
+    }
+
+    const program = gl.createProgram();
+    gl.attachShader(program, compileShader(gl.VERTEX_SHADER, vsSource));
+    gl.attachShader(program, compileShader(gl.FRAGMENT_SHADER, fsSource));
+    gl.linkProgram(program);
+    gl.useProgram(program);
+
+    const uResolution = gl.getUniformLocation(program, 'u_resolution');
+    const uRect = gl.getUniformLocation(program, 'u_rect');
+    const uTexSize = gl.getUniformLocation(program, 'u_texSize');
+    const uSharpness = gl.getUniformLocation(program, 'u_sharpness');
+
+    // Unit quad VAO
+    const vao = gl.createVertexArray();
+    gl.bindVertexArray(vao);
+    const vbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+      0, 0,  0, 0,
+      1, 0,  1, 0,
+      0, 1,  0, 1,
+      0, 1,  0, 1,
+      1, 0,  1, 0,
+      1, 1,  1, 1
+    ]), gl.STATIC_DRAW);
+
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 16, 0);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 16, 8);
+
+    // =========================================================================
+    // APPLICATION STATE & TEXTURE MANAGEMENT
+    // =========================================================================
+    const SHADER_MODES = [
+      { id: '0', label: 'Catmull-Rom Bicubic (Smooth)', val: 0.0 },
+      { id: '1', label: 'Catmull-Rom + CAS (Subtle)', val: 0.42 },
+      { id: '2', label: 'Catmull-Rom + CAS (Balanced)', val: 0.72 },
+      { id: '3', label: 'Catmull-Rom + CAS (Strong Ink)', val: 1.0 },
+      { id: '4', label: 'Standard Hardware Bilinear', val: -1.0 }
+    ];
+    let currentShaderIdx = 2;
+
+    // Each item: { img, tex, natW, natH, baseOffset, baseWidth }
+    let items = [];
+    let isLooping = false;
+    let isManga = false;
+    let gutterWidth = 0;
+    let bgColor = [0.051, 0.051, 0.051];
+    let singleSetWidth = 0;
+
+    let currentX = 0;
+    let targetX = 0;
+    let currentScale = 1;
+    let targetScale = 1;
+    let currentY = 0;
+    let targetY = 0;
+
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let dragStartTargetX = 0;
+    let dragStartTargetY = 0;
+
+    let autoScrollSpeed = 0;
+    let baseAutoSpeed = 2.5;
+    const keysPressed = {};
+    let toastTimer = null;
+
+    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+    function showToast(msg) {
+      toast.textContent = msg;
+      toast.style.opacity = '1';
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 1700);
+    }
+
+    function hexToRgbNorm(hex) {
+      const v = parseInt(hex.replace('#', ''), 16);
+      return [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255];
+    }
+
+    function shuffleArray(arr) {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    function resizeCanvas() {
+      const dpr = window.devicePixelRatio || 1;
+      const w = Math.floor(window.innerWidth * dpr);
+      const h = Math.floor(window.innerHeight * dpr);
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      recomputeLayout();
+    }
+
+    function recomputeLayout() {
+      const vh = window.innerHeight;
+      let cursor = 0;
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        it.baseOffset = cursor;
+        it.baseWidth = it.natH > 0 ? (it.natW / it.natH) * vh : 0;
+        cursor += it.baseWidth;
+        if (i < items.length - 1 || isLooping) {
+          cursor += gutterWidth;
+        }
+      }
+      singleSetWidth = cursor;
+    }
+
+    window.addEventListener('resize', resizeCanvas);
+
+    function createTextureFromImage(img) {
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+      return tex;
+    }
+
+    function loadFiles(fileList) {
+      let files = Array.from(fileList).filter(f => f.type.startsWith('image/'));
+      if (!files.length) return;
+
+      // Clean up previous WebGL textures
+      items.forEach(it => {
+        if (it.tex) gl.deleteTexture(it.tex);
+        if (it.url) URL.revokeObjectURL(it.url);
+      });
+      items = [];
+
+      isManga = optManga.checked;
+      isLooping = optLoop.checked;
+      const isRandom = optRandom.checked;
+      const useGutter = optGutter.checked;
+      gutterWidth = useGutter ? Math.max(0, parseInt(optGutterWidth.value, 10) || 0) : 0;
+      bgColor = useGutter ? hexToRgbNorm(optGutterColor.value) : [0.051, 0.051, 0.051];
+
+      const selectedMode = optSharpness.value;
+      currentShaderIdx = Math.max(0, SHADER_MODES.findIndex(m => m.id === selectedMode));
+
+      if (isRandom) {
+        files = shuffleArray(files);
+      } else {
+        files.sort((a, b) => collator.compare(a.name, b.name));
+        if (isManga) files.reverse();
+      }
+
+      let loadedCount = 0;
+      let initializedStartPos = false;
+
+      files.forEach((file, idx) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        const entry = { img, url, tex: null, natW: 0, natH: 0, baseOffset: 0, baseWidth: 0 };
+        items.push(entry);
+
+        img.onload = () => {
+          entry.natW = img.naturalWidth;
+          entry.natH = img.naturalHeight;
+          entry.tex = createTextureFromImage(img);
+          loadedCount++;
+          recomputeLayout();
+
+          // Once all images (or initial batch) have dimensions, lock Manga start position
+          if (!initializedStartPos && loadedCount === files.length) {
+            initializedStartPos = true;
+            if (isManga) {
+              currentX = targetX = Math.max(0, singleSetWidth - window.innerWidth - (isLooping ? gutterWidth : 0));
+            } else {
+              currentX = targetX = 0;
+            }
+          }
+        };
+        img.src = url;
+      });
+
+      currentScale = targetScale = 1;
+      currentY = targetY = 0;
+      autoScrollSpeed = 0;
+      baseAutoSpeed = isManga ? -2.5 : 2.5;
+
+      dropZone.style.display = 'none';
+      viewport.style.display = 'block';
+      resizeCanvas();
+    }
+
+    // File input & Drag-and-Drop
+    fileInput.addEventListener('change', e => loadFiles(e.target.files));
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      if (e.dataTransfer.files.length) loadFiles(e.dataTransfer.files);
+    });
+
+    // Mouse Wheel
+    window.addEventListener('wheel', e => {
+      if (viewport.style.display === 'none') return;
+      e.preventDefault();
+      autoScrollSpeed = 0;
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      targetX += delta * 1.25;
+    }, { passive: false });
+
+    // Click and Drag
+    viewport.addEventListener('mousedown', e => {
+      isDragging = true;
+      autoScrollSpeed = 0;
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+      dragStartTargetX = targetX;
+      dragStartTargetY = targetY;
+    });
+    window.addEventListener('mousemove', e => {
+      if (!isDragging) return;
+      targetX = dragStartTargetX - (e.clientX - dragStartX);
+      if (targetScale > 1) {
+        const maxY = window.innerHeight * (targetScale - 1);
+        targetY = Math.max(0, Math.min(maxY, dragStartTargetY - (e.clientY - dragStartY)));
+      }
+    });
+    window.addEventListener('mouseup', () => isDragging = false);
+
+    // Double-Click Zoom-to-Panel
+    viewport.addEventListener('dblclick', e => {
+      autoScrollSpeed = 0;
+      if (targetScale === 1) {
+        const zoomFactor = 2.2;
+        const clickWorldX = currentX + e.clientX;
+        const clickWorldY = e.clientY;
+
+        targetScale = zoomFactor;
+        targetX = clickWorldX * zoomFactor - e.clientX;
+        targetY = Math.max(0, Math.min(window.innerHeight * (zoomFactor - 1), clickWorldY * zoomFactor - e.clientY));
+        showToast('Zoom: 2.2x (Double-click to reset)');
+      } else {
+        targetX = (currentX + e.clientX) / currentScale - e.clientX;
+        targetScale = 1;
+        targetY = 0;
+        showToast('Zoom: 1.0x');
+      }
+    });
+
+    // Hotkey Jump (1-0)
+    function jumpToHotkey(digit) {
+      const total = items.length;
+      if (total === 0) return;
+      autoScrollSpeed = 0;
+      targetScale = 1;
+      targetY = 0;
+
+      let logicalIndex = 0;
+      let label = '';
+
+      if (digit === 1) {
+        logicalIndex = 0;
+        label = `Image 1 of ${total} (Start)`;
+      } else if (digit === 0) {
+        logicalIndex = total - 1;
+        label = `Image ${total} of ${total} (End)`;
+      } else {
+        const pct = digit * 10;
+        logicalIndex = Math.min(total - 1, Math.max(0, Math.round((digit / 10) * total) - 1));
+        label = `${pct}% — Image ${logicalIndex + 1} of ${total}`;
+      }
+
+      const domIndex = isManga ? (total - 1 - logicalIndex) : logicalIndex;
+      const targetItem = items[domIndex];
+
+      if (targetItem) {
+        if (isManga) {
+          targetX = (targetItem.baseOffset + targetItem.baseWidth) - window.innerWidth;
+        } else {
+          targetX = targetItem.baseOffset;
+        }
+        showToast(label);
+      }
+    }
+
+    // Keyboard Controls
+    window.addEventListener('keydown', e => {
+      if (viewport.style.display === 'none') return;
+      keysPressed[e.key] = true;
+
+      if (/^[0-9]$/.test(e.key)) {
+        jumpToHotkey(parseInt(e.key, 10));
+        return;
+      }
+
+      if (e.key === ' ') {
+        e.preventDefault();
+        if (autoScrollSpeed !== 0) {
+          baseAutoSpeed = autoScrollSpeed;
+          autoScrollSpeed = 0;
+          showToast('Auto-Pan: Paused');
+        } else {
+          autoScrollSpeed = baseAutoSpeed;
+          showToast(`Auto-Pan: ${Math.abs(autoScrollSpeed).toFixed(1)} px/frame`);
+        }
+      } else if (e.key.toLowerCase() === 'k') {
+        currentShaderIdx = (currentShaderIdx + 1) % SHADER_MODES.length;
+        showToast(`Shader: ${SHADER_MODES[currentShaderIdx].label}`);
+      } else if (e.key === '=' || e.key === '+') {
+        const dir = (autoScrollSpeed !== 0 ? Math.sign(autoScrollSpeed) : Math.sign(baseAutoSpeed)) || 1;
+        const newMag = Math.min(30, Math.abs(autoScrollSpeed || baseAutoSpeed) + 0.75);
+        baseAutoSpeed = dir * newMag;
+        if (autoScrollSpeed !== 0) autoScrollSpeed = baseAutoSpeed;
+        showToast(`Auto-Pan Speed: ${newMag.toFixed(2)}`);
+      } else if (e.key === '-' || e.key === '_') {
+        const dir = (autoScrollSpeed !== 0 ? Math.sign(autoScrollSpeed) : Math.sign(baseAutoSpeed)) || 1;
+        const newMag = Math.max(0.25, Math.abs(autoScrollSpeed || baseAutoSpeed) - 0.75);
+        baseAutoSpeed = dir * newMag;
+        if (autoScrollSpeed !== 0) autoScrollSpeed = baseAutoSpeed;
+        showToast(`Auto-Pan Speed: ${newMag.toFixed(2)}`);
+      } else if (e.key.toLowerCase() === 'r') {
+        baseAutoSpeed = -baseAutoSpeed;
+        autoScrollSpeed = autoScrollSpeed !== 0 ? -autoScrollSpeed : baseAutoSpeed;
+        showToast(autoScrollSpeed > 0 ? 'Direction: Left-to-Right →' : 'Direction: Right-to-Left ←');
+      } else if (e.key.toLowerCase() === 'f') {
+        if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+        else document.exitFullscreen();
+      } else if (e.key === 'Escape' && !document.fullscreenElement) {
+        autoScrollSpeed = 0;
+        viewport.style.display = 'none';
+        dropZone.style.display = 'flex';
+      }
+    });
+    window.addEventListener('keyup', e => { keysPressed[e.key] = false; });
+
+    // =========================================================================
+    // 60/120FPS WEBGL RENDER LOOP (With Viewport Culling)
+    // =========================================================================
+    function renderWebGL() {
+      gl.clearColor(bgColor[0], bgColor[1], bgColor[2], 1.0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+
+      if (items.length === 0 || singleSetWidth <= 0) return;
+
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const scaledSetWidth = singleSetWidth * currentScale;
+      const drawHeight = vh * currentScale;
+
+      gl.useProgram(program);
+      gl.bindVertexArray(vao);
+      gl.uniform2f(uResolution, vw, vh);
+      gl.uniform1f(uSharpness, SHADER_MODES[currentShaderIdx].val);
+
+      // Determine which wrapped copies of the strip intersect the viewport
+      const startCopy = isLooping ? Math.floor(currentX / scaledSetWidth) : 0;
+      const endCopy = isLooping ? Math.floor((currentX + vw) / scaledSetWidth) : 0;
+
+      for (let copy = startCopy; copy <= endCopy; copy++) {
+        const copyOffsetX = copy * scaledSetWidth;
+
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i];
+          if (!it.tex) continue;
+
+          const screenX = copyOffsetX + it.baseOffset * currentScale - currentX;
+          const screenW = it.baseWidth * currentScale;
+
+          // Frustum cull: only draw images currently visible on screen
+          if (screenX + screenW < 0 || screenX > vw) continue;
+
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, it.tex);
+          gl.uniform2f(uTexSize, it.natW, it.natH);
+          gl.uniform4f(uRect, screenX, -currentY, screenW, drawHeight);
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+      }
+    }
+
+    function animate() {
+      if (viewport.style.display !== 'none') {
+        const keySpeed = 18;
+        if (keysPressed['ArrowRight'] || keysPressed['d']) { autoScrollSpeed = 0; targetX += keySpeed; }
+        if (keysPressed['ArrowLeft'] || keysPressed['a']) { autoScrollSpeed = 0; targetX -= keySpeed; }
+
+        if (targetScale > 1) {
+          const maxY = window.innerHeight * (targetScale - 1);
+          if (keysPressed['ArrowDown'] || keysPressed['s']) targetY = Math.min(maxY, targetY + keySpeed);
+          if (keysPressed['ArrowUp'] || keysPressed['w']) targetY = Math.max(0, targetY - keySpeed);
+        }
+
+        targetX += autoScrollSpeed;
+
+        if (isLooping && singleSetWidth > 0) {
+          const scaledSetWidth = singleSetWidth * targetScale;
+          if (targetX >= scaledSetWidth) {
+            targetX -= scaledSetWidth;
+            currentX -= scaledSetWidth;
+          } else if (targetX < 0) {
+            targetX += scaledSetWidth;
+            currentX += scaledSetWidth;
+          }
+        } else {
+          const currentMaxScroll = Math.max(0, singleSetWidth * targetScale - window.innerWidth);
+          targetX = Math.max(0, Math.min(targetX, currentMaxScroll));
+        }
+
+        currentX += (targetX - currentX) * 0.14;
+        currentY += (targetY - currentY) * 0.14;
+        currentScale += (targetScale - currentScale) * 0.16;
+
+        renderWebGL();
+      }
+      requestAnimationFrame(animate);
+    }
+    requestAnimationFrame(animate);
+  </script>
+</body>
+</html>
